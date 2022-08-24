@@ -1,22 +1,28 @@
 import io.qameta.allure.Description;
-import io.qameta.allure.Step;
-import io.restassured.RestAssured;
 import io.restassured.response.Response;
+import model.Order;
+import model.OrderClient;
+import model.OrderGenerator;
 import org.junit.After;
-import org.junit.BeforeClass;
+import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import java.util.List;
 
-import static io.restassured.RestAssured.*;
-import static org.hamcrest.CoreMatchers.notNullValue;
+import static model.StepProvider.step;
+import static org.apache.http.HttpStatus.SC_CREATED;
+import static org.apache.http.HttpStatus.SC_OK;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 @RunWith(Parameterized.class)
 public class OrderCreationTest {
 
-    private static int track;
-    private final List<String> color;
+    private Integer track;
+    private Order order;
+    private OrderClient orderClient;
+    private List<String> color;
 
     public OrderCreationTest(List<String> color) {
         this.color = color;
@@ -24,85 +30,42 @@ public class OrderCreationTest {
 
     @Parameterized.Parameters(name = "Создание заказа с полем цвет: {0}")
     public static Object[] getData() {
-        return new Object[]{List.of("\"BLACK\""),
-                List.of("\"GREY\""),
-                List.of("\"BLACK\"", "\"GREY\""),
+        return new Object[]{List.of("BLACK"),
+                List.of("GREY"),
+                List.of("BLACK", "GREY"),
                 List.of()};
     }
 
-    @BeforeClass
-    public static void setUp() {
-        RestAssured.baseURI = "http://qa-scooter.praktikum-services.ru";
+    @Before
+    public void setUp() {
+        order = OrderGenerator.getOrder();
+        orderClient = new OrderClient();
     }
 
     @After
     public void tearDown() {
-        cancelOrder(track);
+        orderClient.cancel(track);
     }
 
     @Test
     @Description("Проверка возможности создания заказа с разными значениями поля color.")
     public void ordersCreatesOrder() {
-        String body = "{\n" +
-                "    \"firstName\": \"Naruto\",\n" +
-                "    \"lastName\": \"Uzumaki\",\n" +
-                "    \"address\": \"Konoha, 142 apt.\",\n" +
-                "    \"metroStation\": 4,\n" +
-                "    \"phone\": \"+7 800 355 35 35\",\n" +
-                "    \"rentTime\": 5,\n" +
-                "    \"deliveryDate\": \"2022-08-22\",\n" +
-                "    \"comment\": \"Saske, come back to Konoha\",\n" +
-                "    \"color\":" + color +
-                "\n}";
+        order.setColor(color);
 
-        Response response = sendPostOrders(body);
+        step("Отправить запрос на создание заказа");
+        Response response = orderClient.create(order);
 
-        track = assertThatOrderCreated(response);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 201 CREATED", SC_CREATED, statusCode);
 
-        assertThatOrderExist(track);
-    }
+        step("Проверить наличие track в ответе");
+        track = response.then().extract().path("track");
+        assertNotNull(track);
 
-    @Step("Отправить запрос на создание заказа.")
-    private Response sendPostOrders(String body) {
-        return given()
-                .header("Content-type", "application/json")
-                .and()
-                .body(body)
-                .post("/api/v1/orders");
-    }
-
-    @Step("Проверить, что заказ создался.")
-    private int assertThatOrderCreated(Response response) {
-        return response.then()
-                .assertThat()
-                .statusCode(201)
-                .and()
-                .extract().path("track");
-    }
-
-    @Step("Проверить, что заказ находится по track.")
-    private void assertThatOrderExist(int track) {
-
-        given()
-                .queryParam("t", track)
-        .when()
-                .get("/api/v1/orders/track")
-        .then()
-                .assertThat()
-                .statusCode(200)
-                .and()
-                .body("order", notNullValue());
-    }
-
-    @Step("Отменить заказ.")
-    private static void cancelOrder(int track) {
-
-        String body = "{ \"track\":" + track + "}";
-
-        given()
-                .header("Content-type", "application/json")
-                .and()
-                .body(body)
-                .put("/api/v1/orders");
+        step("Проверить что заказ создался");
+        response = orderClient.track(track);
+        statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 200", SC_OK, statusCode);
     }
 }

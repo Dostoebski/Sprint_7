@@ -1,169 +1,141 @@
 import io.qameta.allure.Description;
-import io.qameta.allure.Step;
 import io.qameta.allure.junit4.DisplayName;
-import io.restassured.RestAssured;
 import io.restassured.response.Response;
+import model.Courier;
+import model.CourierClient;
+import model.CourierCredentials;
+import model.CourierGenerator;
 import org.junit.After;
-import org.junit.BeforeClass;
+import org.junit.Before;
 import org.junit.Test;
 
-import static io.restassured.RestAssured.*;
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.notNullValue;
+import static model.StepProvider.step;
+import static org.apache.http.HttpStatus.*;
+import static org.junit.Assert.*;
 
 public class CourierCreationTest {
 
-    @BeforeClass
-    public static void setUp() {
-        RestAssured.baseURI = "http://qa-scooter.praktikum-services.ru";
+    private static Courier courier;
+    private static CourierClient courierClient;
+    private static Integer id;
+
+    @Before
+    public void setUp() {
+        courier = CourierGenerator.getCourier();
+        courierClient = new CourierClient();
     }
 
     @After
     public void tearDown() {
-        deleteCourier();
+        if (id != null) {
+            courierClient.delete(id);
+        }
     }
 
     @Test
     @DisplayName("Успешное создание курьера")
     @Description("Проверка позитивного сценария создания курьера.")
-    public void postCourierWithValidFieldsCreatesCourier() {
+    public void createCourierWithValidFieldsCreatesCourier() {
 
-        String body = "{\"login\": \"redTractor\", \"password\": \"1234\", \"firstName\": \"Pyotr\"}";
+        step("Отправить запрос на создание курьера");
+        Response response = courierClient.create(courier);
 
-        Response response = sendPostCourier(body);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 201 CREATED", SC_CREATED, statusCode);
 
-        assetThatCourierResponseValid(response);
+        step("Проверить тело ответа");
+        Boolean isOk = response.then().extract().path("ok");
+        assertTrue(isOk);
 
-        body = "{ \"login\": \"redTractor\", \"password\": \"1234\" }";
-
-        assertThatCourierIsCreated(body);
+        step("Убедиться, что курьер создался");
+        id = courierClient.login(CourierCredentials.from(courier)).then().extract().path("id");
+        assertNotNull(id);
     }
 
     @Test
     @DisplayName("Логин уже используется")
     @Description("Попытка создания курьера с логином, который уже есть в системе.")
-    public void postCourierWithAlreadyExistedLoginReturnFault() {
+    public void createCourierWithAlreadyExistedLoginReturnFault() {
 
-        String body = "{\"login\": \"redTractor\", \"password\": \"1234\", \"firstName\": \"Pyotr\"}";
+        courierClient.create(courier);
+        id = courierClient.login(CourierCredentials.from(courier)).then().extract().path("id");
 
-        sendPostCourier(body);
+        step("Отправить запрос на создание курьера");
+        Response response = courierClient.create(courier);
 
-        Response response = sendPostCourier(body);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 409 CONFLICT", SC_CONFLICT, statusCode);
 
-        assertThatLoginAlreadyInUse(response);
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Этот логин уже используется", message);
     }
 
     @Test
     @DisplayName("Запрос без поля логина")
     @Description("Попытка создания курьера без поля login.")
-    public void postCourierWithoutLoginReturnBadRequest() {
+    public void createCourierWithoutLoginReturnBadRequest() {
 
-        String body = "{\"password\": \"1234\", \"firstName\": \"Pyotr\"}";
+        courier.setLogin(null);
 
-        Response response = sendPostCourier(body);
+        step("Отправить запрос на создание курьера");
+        Response response = courierClient.create(courier);
 
-        assertThatProvidedDataIsNotEnough(response);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        if (statusCode == SC_CREATED) {
+            id = courierClient.login(CourierCredentials.from(courier)).then().extract().path("id");
+        }
+        assertEquals("Status code is not 400 BAD_REQUEST", SC_BAD_REQUEST, statusCode);
 
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Недостаточно данных для создания учетной записи", message);
     }
 
     @Test
     @DisplayName("Запрос без поля пароль")
     @Description("Попытка создания курьера без поля password.")
-    public void postCourierWithoutPasswordReturnBadRequest() {
+    public void createCourierWithoutPasswordReturnBadRequest() {
 
-        String body = "{\"login\": \"redTractor\", \"firstName\": \"Pyotr\"}";
+        courier.setPassword(null);
 
-        Response response = sendPostCourier(body);
+        step("Отправить запрос на создание курьера");
+        Response response = courierClient.create(courier);
 
-        assertThatProvidedDataIsNotEnough(response);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        if (statusCode == SC_CREATED) {
+            id = courierClient.login(CourierCredentials.from(courier)).then().extract().path("id");
+        }
+        assertEquals("Status code is not 400 BAD_REQUEST", SC_BAD_REQUEST, statusCode);
 
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Недостаточно данных для создания учетной записи", message);
     }
 
     @Test
     @DisplayName("Запрос без поля Имя")
     @Description("Попытка создания курьера без поля firstname.")
-    public void postCourierWithoutFirstNameReturnBadRequest() {
+    public void createCourierWithoutFirstNameReturnBadRequest() {
 
-        String body = "{\"login\": \"redTractor\", \"password\": \"1234\"}";
+        courier.setFirstName(null);
 
-        Response response = sendPostCourier(body);
+        step("Отправить запрос на создание курьера");
+        Response response = courierClient.create(courier);
 
-        assertThatProvidedDataIsNotEnough(response);
-    }
-
-    @Step("Отправить запрос на создание курьера.")
-    private Response sendPostCourier(String body) {
-        return given()
-                .header("Content-type", "application/json")
-                .and()
-                .body(body)
-                .post("/api/v1/courier");
-    }
-
-    @Step("Проверить ответ.")
-    private void assetThatCourierResponseValid(Response response) {
-        response.then()
-                .assertThat()
-                .statusCode(201)
-                .and()
-                .body("ok", equalTo(true));
-    }
-
-    @Step("Проверить, что курьер создался.")
-    private void assertThatCourierIsCreated(String body) {
-        given()
-                .header("Content-type", "application/json")
-                .and()
-                .body(body)
-        .when()
-                .post("/api/v1/courier/login")
-        .then()
-                .assertThat()
-                .statusCode(200)
-                .and()
-                .body("id", notNullValue());
-    }
-
-    @Step("Проверить, что такой логин уже используется.")
-    private void assertThatLoginAlreadyInUse(Response response) {
-        response.then()
-                .assertThat()
-                .statusCode(409)
-                .and()
-                .body("message", equalTo("Этот логин уже используется"));
-    }
-
-    @Step("Проверить, что данных в запросе недостаточно.")
-    private void assertThatProvidedDataIsNotEnough(Response response) {
-        response.then()
-                .assertThat()
-                .statusCode(400)
-                .and()
-                .body("message", equalTo("Недостаточно данных для создания учетной записи"));
-    }
-
-    @Step("Удалить курьера, если создавался.")
-    private void deleteCourier() {
-
-        int id;
-
-        try {
-            String body = "{ \"login\": \"redTractor\", \"password\": \"1234\" }";
-
-            id = given()
-                    .header("Content-type", "application/json")
-                    .and()
-                    .body(body)
-                 .when()
-                    .post("/api/v1/courier/login")
-                 .then()
-                    .extract().path("id");
-        } catch (NullPointerException e) {
-            id = 0;
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        if (statusCode == SC_CREATED) {
+            id = courierClient.login(CourierCredentials.from(courier)).then().extract().path("id");
         }
+        assertEquals("Status code is not 400 BAD_REQUEST", SC_BAD_REQUEST, statusCode);
 
-        if (id > 0) {
-            given().delete("/api/v1/courier/" + id);
-        }
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Недостаточно данных для создания учетной записи", message);
     }
 }

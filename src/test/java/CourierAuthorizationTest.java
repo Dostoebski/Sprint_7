@@ -1,27 +1,38 @@
 import io.qameta.allure.Description;
-import io.qameta.allure.Step;
 import io.qameta.allure.junit4.DisplayName;
-import io.restassured.RestAssured;
 import io.restassured.response.Response;
-import org.junit.AfterClass;
-import org.junit.BeforeClass;
-import org.junit.Test;
+import model.Courier;
+import model.CourierClient;
+import model.CourierCredentials;
+import model.CourierGenerator;
+import org.junit.*;
 
-import static io.restassured.RestAssured.given;
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.notNullValue;
+import static model.StepProvider.step;
+import static org.apache.http.HttpStatus.*;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 
 public class CourierAuthorizationTest {
 
+    private static Courier courier;
+    private static CourierClient courierClient;
+    private static Integer id;
+
     @BeforeClass
     public static void setUp() {
-        RestAssured.baseURI = "http://qa-scooter.praktikum-services.ru";
-        createCourier();
+        courier = CourierGenerator.getCourier();
+        courierClient = new CourierClient();
+        courierClient.create(courier);
     }
 
     @AfterClass
     public static void tearDown() {
-        deleteCourier();
+        courierClient.delete(id);
+    }
+
+    @After
+    public void resetCourier() {
+        courier = CourierGenerator.getCourier();
     }
 
     @Test
@@ -29,11 +40,16 @@ public class CourierAuthorizationTest {
     @Description("Проверка возможности входа с правильными логином и паролем.")
     public void loginWithValidCredentialsSucceed() {
 
-        String body = "{ \"login\": \"tractor\", \"password\": \"1234\" }";
+        step("Отправить запрос на логин");
+        Response response = courierClient.login(CourierCredentials.from(courier));
 
-        Response response = sendPostCourierLogin(body);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not OK", SC_OK, statusCode);
 
-        assertThatCourierAuthorized(response);
+        step("Проверить наличие id в ответе");
+        id = response.then().extract().path("id");
+        assertNotNull(id);
     }
 
     @Test
@@ -41,11 +57,18 @@ public class CourierAuthorizationTest {
     @Description("Попытка авторизоваться без указания логина.")
     public void loginWithoutLoginFieldReturnFault() {
 
-        String body = "{\"password\": \"1234\"}";
+        courier.setLogin(null);
 
-        Response response = sendPostCourierLogin(body);
+        step("Отправить запрос на логин");
+        Response response = courierClient.login(CourierCredentials.from(courier));
 
-        assertThatProvidedDataIsNotEnough(response);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not BAD_REQUEST", SC_BAD_REQUEST, statusCode);
+
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Недостаточно данных для входа", message);
     }
 
     @Test
@@ -53,11 +76,18 @@ public class CourierAuthorizationTest {
     @Description("Попытка авторизоваться без указания пароля.")
     public void loginWithoutPasswordFieldReturnFault() {
 
-        String body = "{\"login\": \"tractor\"}";
+        courier.setPassword(null);
 
-        Response response = sendPostCourierLogin(body);
+        step("Отправить запрос на логин");
+        Response response = courierClient.login(CourierCredentials.from(courier));
 
-        assertThatProvidedDataIsNotEnough(response);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 400 BAD_REQUEST", SC_BAD_REQUEST, statusCode);
+
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Недостаточно данных для входа", message);
     }
 
     @Test
@@ -65,11 +95,18 @@ public class CourierAuthorizationTest {
     @Description("Попытка авторизации с неверным логином учетной записи.")
     public void loginWithWrongLoginReturnFault() {
 
-        String body = "{ \"login\": \"badTractor\", \"password\": \"1234\" }";
+        courier.setLogin("badTractor");
 
-        Response response = sendPostCourierLogin(body);
+        step("Отправить запрос на логин");
+        Response response = courierClient.login(CourierCredentials.from(courier));
 
-        assertThatCourierNotFound(response);
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 404 NOT_FOUND", SC_NOT_FOUND, statusCode);
+
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Учетная запись не найдена", message);
     }
 
     @Test
@@ -77,72 +114,17 @@ public class CourierAuthorizationTest {
     @Description("Попытка авторизации с неверным паролем учетной записи.")
     public void loginWithWrongPasswordReturnFault() {
 
-        String body = "{ \"login\": \"tractor\", \"password\": \"1111\" }";
+        courier.setPassword("1111");
 
-        Response response = sendPostCourierLogin(body);
+        step("Отправить запрос на логин");
+        Response response = courierClient.login(CourierCredentials.from(courier));
 
-        assertThatCourierNotFound(response);
-    }
+        step("Проверить статус ответа");
+        int statusCode = response.then().extract().statusCode();
+        assertEquals("Status code is not 404 NOT_FOUND", SC_NOT_FOUND, statusCode);
 
-    @Step("Создать курьера.")
-    private static void createCourier() {
-        String body = "{\"login\": \"tractor\", \"password\": \"1234\", \"firstName\": \"Pyotr\"}";
-
-         given()
-                 .header("Content-type", "application/json")
-                 .and()
-                 .body(body)
-                 .post("/api/v1/courier");
-    }
-
-    @Step("Отправить запрос на авторизацию.")
-    private static Response sendPostCourierLogin(String body) {
-        return given()
-                .header("Content-type", "application/json")
-                .and()
-                .body(body)
-                .post("/api/v1/courier/login");
-    }
-
-    @Step("Проверить, что курьер авторизовался.")
-    private void assertThatCourierAuthorized(Response response) {
-        response.then()
-                .assertThat()
-                .statusCode(200)
-                .and()
-                .body("id", notNullValue());
-    }
-
-    @Step("Проверить, что данных недостаточно для входа.")
-    private void assertThatProvidedDataIsNotEnough(Response response) {
-        response.then()
-                .assertThat()
-                .statusCode(400)
-                .and()
-                .body("message", equalTo("Недостаточно данных для входа"));
-    }
-
-    @Step("Проверить, что учетная запись не найдена.")
-    private void assertThatCourierNotFound(Response response) {
-        response.then()
-                .assertThat()
-                .statusCode(404)
-                .and()
-                .body("message", equalTo("Учетная запись не найдена"));
-    }
-
-    @Step("Удалить курьера.")
-    private static void deleteCourier() {
-
-        String body = "{ \"login\": \"tractor\", \"password\": \"1234\" }";
-
-        Response response = sendPostCourierLogin(body);
-
-        int id = response.then()
-                .extract().path("id");
-
-        if (id > 0) {
-            given().delete("/api/v1/courier/" + id);
-        }
+        step("Проверить текст ошибки в ответе");
+        String message = response.then().extract().path("message");
+        assertEquals("Message doesn't match", "Учетная запись не найдена", message);
     }
 }
